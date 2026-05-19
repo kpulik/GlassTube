@@ -32,10 +32,53 @@ struct SettingsView: View {
     @State private var authSavedMessage: String?
     @State private var showingGuidedSetup = false
     @State private var currentSetupStep = 0
-    
+
+    private var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
+    }
+    private var appBuild: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"
+    }
+
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                            Text("Unofficial third-party client — please read")
+                                .font(.callout.weight(.semibold))
+                        }
+
+                        Text("GlassTube is not affiliated with, endorsed by, or sponsored by YouTube or Google LLC. YouTube's Terms of Service only permit access through the interfaces YouTube provides, so third-party clients like this app technically violate that policy. The practical risks fall on your account:")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            disclaimerBullet("Google may restrict, suspend, or terminate any Google account that signs in through this app.")
+                            disclaimerBullet("Sign-in is optional. Anonymous browsing carries far less personal risk than signing in.")
+                            disclaimerBullet("Features that depend on YouTube's internal API (home feed, search, comments, Watch Later, suggested videos) can break or disappear without warning.")
+                            disclaimerBullet("SponsorBlock, Return YouTube Dislike, and DeArrow are independent third-party services with their own terms.")
+                        }
+
+                        Text("If you sign in, strongly consider using a secondary Google account, not your primary one. Use at your own risk.")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.primary)
+
+                        HStack(spacing: 16) {
+                            Link("YouTube Terms of Service", destination: URL(string: "https://www.youtube.com/t/terms")!)
+                                .font(.caption)
+                            Link("About this project", destination: URL(string: "https://github.com/kpulik/GlassTube#disclaimer")!)
+                                .font(.caption)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                } header: {
+                    Text("Disclaimer")
+                }
+
                 Section("Content") {
                     Toggle("Autoplay", isOn: $autoplay)
                         .help("Automatically play the next video")
@@ -376,7 +419,7 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text("GlassTube v1.0.0")
+                                Text("GlassTube v\(appVersion)")
                                     .font(.headline)
                                 
                                 if checkingForUpdates {
@@ -450,8 +493,8 @@ struct SettingsView: View {
                 }
                 
                 Section("About") {
-                    LabeledContent("Version", value: "1.0.0")
-                    LabeledContent("Build", value: "2026.04.11")
+                    LabeledContent("Version", value: appVersion)
+                    LabeledContent("Build", value: appBuild)
                     
                     Button("View on GitHub") {
                         if let url = URL(string: "https://github.com/kpulik/GlassTube") {
@@ -538,11 +581,10 @@ struct SettingsView: View {
                     // Remove 'v' prefix if present
                     let version = tagName.replacingOccurrences(of: "v", with: "")
                     
+                    let current = appVersion
                     await MainActor.run {
                         latestVersion = version
-                        // Compare versions (simple string comparison for now)
-                        // TODO: Implement semantic versioning comparison
-                        updateAvailable = version != "1.0.0"
+                        updateAvailable = Self.versionIsNewer(latest: version, than: current)
                         checkingForUpdates = false
                     }
                 }
@@ -561,6 +603,30 @@ struct SettingsView: View {
             returnYoutubeDislikeEnabled: returnYoutubeDislikeEnabled,
             deArrowEnabled: dearrowEnabled
         )
+    }
+
+    private func disclaimerBullet(_ text: String) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Text("•")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    nonisolated static func versionIsNewer(latest: String, than current: String) -> Bool {
+        let latestParts = latest.split(separator: ".").compactMap { Int($0) }
+        let currentParts = current.split(separator: ".").compactMap { Int($0) }
+        let count = max(latestParts.count, currentParts.count)
+        for i in 0..<count {
+            let l = i < latestParts.count ? latestParts[i] : 0
+            let c = i < currentParts.count ? currentParts[i] : 0
+            if l > c { return true }
+            if l < c { return false }
+        }
+        return false
     }
 }
 

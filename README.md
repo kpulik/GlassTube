@@ -2,6 +2,19 @@
 
 A native macOS YouTube client built with SwiftUI and Apple's Liquid Glass design language.
 
+## Disclaimer
+
+> **⚠️ GlassTube is an unofficial third-party client. Please read before installing.**
+>
+> GlassTube is **not affiliated with, endorsed by, or sponsored by YouTube or Google LLC.** YouTube's [Terms of Service](https://www.youtube.com/t/terms) only permit access to the service through the interfaces YouTube provides, so third-party clients like this app technically violate that policy. The practical risks fall on your account, not on the app:
+>
+> - **Your Google account is at risk if you sign in.** Google may restrict, suspend, or terminate any account that signs in through an unofficial client. If you sign in, **strongly consider using a secondary Google account**, not your primary one.
+> - **Sign-in is optional.** Anonymous browsing (home feed, search, video playback, downloads) carries far less personal risk than signing in. Only sign in if you need subscriptions, comments, or Watch Later.
+> - **Features can break without warning.** GlassTube relies on YouTube's internal API (Innertube) for most reads. YouTube changes this API at will and any feature can disappear overnight.
+> - **Distribution is not guaranteed.** Google has issued takedowns against third-party YouTube clients before (YouTube Vanced, NewPipe on the App Store, various others). This repository or its releases could be removed at any time.
+> - **Third-party extensions** — SponsorBlock, Return YouTube Dislike, and DeArrow — are independent services with their own terms; GlassTube only consumes their public APIs.
+> - **No warranty.** Released under [MIT](LICENSE). Use at your own risk.
+
 ## Install
 
 1. Download the latest `GlassTube-*.zip` from [Releases](../../releases/latest).

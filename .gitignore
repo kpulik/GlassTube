@@ -1,0 +1,33 @@
+# macOS
+.DS_Store
+
+# Xcode user-specific
+xcuserdata/
+*.xcuserstate
+*.xcuserdatad/
+*.xcscheme.local
+
+# Build outputs
+build/
+DerivedData/
+.dist/
+*.xcarchive
+
+# Swift Package Manager (not used today, here just in case)
+.swiftpm/
+.build/
+Packages/
+Package.pins
+Package.resolved
+
+# CI / release artifacts
+GlassTube-*.zip
+GlassTube-*.zip.sha256
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+
+CLAUDE.md

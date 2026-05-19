@@ -1,0 +1,124 @@
+name: Release
+
+# Fires when a tag matching v*.*.* is pushed (e.g. v0.1.0, v1.2.3).
+# Builds GlassTube.app, zips it, and publishes a GitHub Release.
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build (e.g. v0.1.0). Used only for manual runs.'
+        required: true
+        default: 'v0.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    # GlassTube requires the macOS 26 (Tahoe) SDK for Liquid Glass APIs.
+    # macos-latest currently lags behind; pin to macos-26 when available,
+    # otherwise the build step will fail with a clear SDK error.
+    runs-on: macos-26
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select latest Xcode
+        run: |
+          # Pick the newest Xcode on the runner.
+          LATEST=$(ls /Applications | grep -E '^Xcode(_.+)?\.app$' | sort -V | tail -1)
+          echo "Selecting: $LATEST"
+          sudo xcode-select -s "/Applications/$LATEST/Contents/Developer"
+          xcodebuild -version
+          xcrun --show-sdk-path --sdk macosx
+          xcrun --show-sdk-version --sdk macosx
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building $TAG (version $VERSION)"
+
+      - name: Build (Release, unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project GlassTube.xcodeproj \
+            -scheme GlassTube \
+            -configuration Release \
+            -destination 'generic/platform=macOS' \
+            -derivedDataPath build \
+            MARKETING_VERSION="${{ steps.ver.outputs.version }}" \
+            CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM="" \
+            clean build
+
+      - name: Verify .app exists
+        run: |
+          APP="build/Build/Products/Release/GlassTube.app"
+          if [ ! -d "$APP" ]; then
+            echo "::error::Build did not produce $APP"
+            ls -laR build/Build/Products || true
+            exit 1
+          fi
+          echo "Built: $APP"
+          /usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP/Contents/Info.plist" || true
+          /usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$APP/Contents/Info.plist" || true
+
+      - name: Package zip + checksum
+        id: pkg
+        run: |
+          APP="build/Build/Products/Release/GlassTube.app"
+          ZIP="GlassTube-${{ steps.ver.outputs.tag }}.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
+          shasum -a 256 "$ZIP" | tee "$ZIP.sha256"
+          ls -la "$ZIP" "$ZIP.sha256"
+          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.ver.outputs.tag }}"
+          ZIP="${{ steps.pkg.outputs.zip }}"
+          NOTES_FILE="$(mktemp)"
+          cat > "$NOTES_FILE" <<'EOF'
+          ## GlassTube — macOS YouTube client
+
+          **Requirements:** macOS 26 (Tahoe) or later. Apple Silicon or Intel.
+
+          ### Install
+          1. Download `GlassTube-__TAG__.zip` below.
+          2. Unzip → drag `GlassTube.app` to `/Applications`.
+          3. First launch: right-click the app → **Open** → **Open** (this build is unsigned, so Gatekeeper will warn the first time only).
+
+          ### Optional features
+          - **Sign-in (subscriptions, comments, Watch Later):** create a *TVs & Limited Input* OAuth client in Google Cloud Console, then paste the client ID + secret in Settings → Authentication.
+          - **Downloads:** install `yt-dlp` (`brew install yt-dlp`).
+
+          ### Notes
+          - Third-party YouTube client; not affiliated with YouTube or Google.
+          - SHA-256 checksum is published alongside the zip.
+          EOF
+          # Inject the tag into the notes
+          sed -i '' "s/__TAG__/${TAG}/g" "$NOTES_FILE"
+
+          gh release create "$TAG" \
+            "$ZIP" "$ZIP.sha256" \
+            --title "GlassTube $TAG" \
+            --notes-file "$NOTES_FILE"

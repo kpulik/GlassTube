@@ -772,31 +772,39 @@ struct WatchView: View {
         commentsErrorMessage = nil
         defer { isLoadingComments = false }
 
-        guard authManager.isSignedIn else {
-            comments = []
-            commentsErrorMessage = "Sign in to load comments in-app, or open comments on YouTube."
-            return
+        // Comments via Innertube `next`/continuation are public — no auth
+        // required. Always try the anonymous path first so users see comments
+        // whether they're signed in or not.
+        do {
+            let anonymous = try await youtubeService.fetchComments(videoId: videoId, accessToken: nil)
+            if !anonymous.isEmpty || !authManager.isSignedIn {
+                comments = anonymous
+                return
+            }
+        } catch {
+            // Fall through to the signed-in attempt below; if that also fails
+            // we'll surface this anonymous-path error.
+            if !authManager.isSignedIn {
+                comments = []
+                if youtubeService.isQuotaExceededError(error) {
+                    commentsErrorMessage = youtubeService.quotaExceededMessage(for: "Comments")
+                } else {
+                    commentsErrorMessage = "Couldn't load comments: \(error.localizedDescription)"
+                }
+                return
+            }
         }
 
-        let token: String?
-        token = await authManager.getValidToken()
-
-        guard let token else {
+        // Signed-in retry: a few videos limit anonymous access. Try with a
+        // bearer token if we have one.
+        guard let token = await authManager.getValidToken() else {
             comments = []
-            commentsErrorMessage = "Sign in again to load comments in-app."
             return
         }
 
         do {
             comments = try await youtubeService.fetchComments(videoId: videoId, accessToken: token)
         } catch {
-            if youtubeService.isInsufficientScopeError(error),
-               let fallbackComments = try? await youtubeService.fetchComments(videoId: videoId, accessToken: nil) {
-                comments = fallbackComments
-                commentsErrorMessage = nil
-                return
-            }
-
             comments = []
             if youtubeService.isQuotaExceededError(error) {
                 commentsErrorMessage = youtubeService.quotaExceededMessage(for: "Comments")

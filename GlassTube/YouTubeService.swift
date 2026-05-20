@@ -1875,11 +1875,18 @@ class YouTubeService: ObservableObject {
     }
 
     private func manifest(defaultURL: URL, options: [StreamQualityOption]) -> StreamManifest {
-        var resolvedOptions: [StreamQualityOption] = [
-            StreamQualityOption(id: "auto", label: "Auto", url: defaultURL, height: Int.max)
-        ]
+        // HLS-mode options share `defaultURL` (one manifest, many resolution
+        // rungs the player picks via `preferredMaximumResolution`). The old
+        // filter dropped same-URL options and reduced the picker to just
+        // "Auto". Dedup by id+label instead so HLS heights survive.
+        let autoOption = StreamQualityOption(id: "auto", label: "Auto", url: defaultURL, height: Int.max)
+        var resolvedOptions: [StreamQualityOption] = [autoOption]
+        var seenIDs: Set<String> = [autoOption.id]
+        var seenLabels: Set<String> = [autoOption.label]
 
-        for option in options where option.url != defaultURL {
+        for option in options where !seenIDs.contains(option.id) && !seenLabels.contains(option.label) {
+            seenIDs.insert(option.id)
+            seenLabels.insert(option.label)
             resolvedOptions.append(option)
         }
 

@@ -228,10 +228,6 @@ struct VideoPlayerView: View {
                 viewModel.seekForward(10)
                 return .handled
             }
-            .onKeyPress("c") {
-                viewModel.subtitlesEnabled.toggle()
-                return .handled
-            }
             .onKeyPress("t") {
                 toggleTheaterMode()
                 return .handled
@@ -477,46 +473,12 @@ struct PlayerControlsOverlay: View {
                 .popover(isPresented: $showingSettings, arrowEdge: .top) {
                     SettingsPopover(viewModel: viewModel)
                 }
-                
-                // Subtitles
-                Menu {
-                    if viewModel.availableSubtitleOptions.isEmpty {
-                        Text("No captions available for this video")
-                    } else {
-                        Button {
-                            viewModel.subtitlesEnabled = false
-                        } label: {
-                            if !viewModel.subtitlesEnabled {
-                                Label("Off", systemImage: "checkmark")
-                            } else {
-                                Text("Off")
-                            }
-                        }
-                        Divider()
-                        ForEach(viewModel.availableSubtitleOptions, id: \.self) { option in
-                            Button {
-                                viewModel.selectSubtitleOption(option)
-                            } label: {
-                                if viewModel.subtitlesEnabled && viewModel.selectedSubtitleOption == option {
-                                    Label(option.displayName, systemImage: "checkmark")
-                                } else {
-                                    Text(option.displayName)
-                                }
-                            }
-                        }
-                    }
-                } label: {
-                    Image(systemName: "captions.bubble.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(viewModel.subtitlesEnabled && !viewModel.availableSubtitleOptions.isEmpty ? .yellow : .white)
-                        .frame(width: 24, height: 24)
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help(viewModel.availableSubtitleOptions.isEmpty
-                      ? "No captions available"
-                      : "Subtitles / CC")
+                // Embedded HLS caption track support has been removed from the
+                // player control bar — YouTube's HLS manifests rarely expose
+                // legible renditions, so the in-player CC button was almost
+                // always inert. Captions are now handled exclusively through
+                // macOS Live Captions, surfaced via the "Need captions?"
+                // panel above the player and the Settings toggle.
 
                 if pipCoordinator.isSupported {
                     Button(action: { pipCoordinator.toggle() }) {

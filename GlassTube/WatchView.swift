@@ -1152,12 +1152,23 @@ struct SuggestedVideosSidebar: View {
 struct SuggestedVideoRow: View {
     let video: Video
     let onTap: () -> Void
-    
+
+    @EnvironmentObject private var authManager: AuthManager
+    @EnvironmentObject private var youtubeService: YouTubeService
+    @EnvironmentObject private var downloadManager: DownloadManager
+
+    @AppStorage("watchLaterDestination") private var watchLaterDestination = "glasstube"
+
     @State private var isHovered = false
-    
+    @State private var showingPlaylistPicker = false
+    @State private var showingDownloadPicker = false
+    @State private var availableFormats: [DownloadFormatOption] = []
+    @State private var isLoadingFormats = false
+    @State private var showingActionAlert = false
+    @State private var actionMessage = ""
+
     var body: some View {
-        Button(action: onTap) {
-            HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: 12) {
             // Thumbnail
             ZStack(alignment: .bottomTrailing) {
                 CachedAsyncImage(url: URL(string: video.thumbnailURL)) { image in
@@ -1172,7 +1183,7 @@ struct SuggestedVideoRow: View {
                 }
                 .frame(width: 160, height: 90)
                 .cornerRadius(8)
-                
+
                 // Duration
                 if !video.isLive && video.duration > 0 {
                     Text(video.formattedDuration)
@@ -1188,18 +1199,20 @@ struct SuggestedVideoRow: View {
                         .padding(4)
                 }
             }
-            
+            .contentShape(Rectangle())
+            .onTapGesture(perform: onTap)
+
             // Metadata
             VStack(alignment: .leading, spacing: 4) {
                 Text(video.title)
                     .font(.body)
                     .fontWeight(.medium)
                     .lineLimit(2)
-                
+
                 Text(video.channelName)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                
+
                 HStack(spacing: 4) {
                     Text(video.formattedViews)
                     Text("•")
@@ -1208,11 +1221,33 @@ struct SuggestedVideoRow: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
-            
-            Spacer()
+            .contentShape(Rectangle())
+            .onTapGesture(perform: onTap)
+
+            Spacer(minLength: 0)
+
+            // 3-dot menu — kept independent from the row tap target so opening
+            // the menu doesn't navigate into the video.
+            Menu {
+                Button("Play") { onTap() }
+                Button("Download Video") { startDownload() }
+                Button("Add to Watch Later") {
+                    Task { await addToWatchLater() }
+                }
+                Button("Save to Playlist") {
+                    showingPlaylistPicker = true
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .foregroundStyle(.secondary)
+                    .padding(4)
+                    .contentShape(Rectangle())
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .opacity(isHovered ? 1 : 0.55)
         }
-        }
-        .buttonStyle(.plain)
         .padding(.horizontal, 16)
         .padding(.vertical, 4)
         .background(isHovered ? Color.primary.opacity(0.05) : Color.clear)
@@ -1221,6 +1256,92 @@ struct SuggestedVideoRow: View {
                 isHovered = hovering
             }
         }
+        .alert("Video Action", isPresented: $showingActionAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(actionMessage)
+        }
+        .sheet(isPresented: $showingPlaylistPicker) {
+            PlaylistPickerSheet(video: video)
+                .environmentObject(authManager)
+                .environmentObject(youtubeService)
+        }
+        .sheet(isPresented: $showingDownloadPicker) {
+            DownloadPickerSheet(
+                videoId: video.id,
+                videoTitle: video.title,
+                channelName: video.channelName,
+                thumbnailURL: video.thumbnailURL,
+                isLoading: isLoadingFormats,
+                formats: availableFormats,
+                onDownloadWithFormat: { format in
+                    downloadManager.downloadWithFormat(
+                        videoId: video.id,
+                        title: video.title,
+                        channelName: video.channelName,
+                        thumbnailURL: video.thumbnailURL,
+                        formatOption: format
+                    )
+                    showingDownloadPicker = false
+                }
+            )
+        }
+    }
+
+    private var isPlaceholderVideo: Bool {
+        video.id.hasPrefix("mock_") || video.id.hasPrefix("sample_")
+    }
+
+    private func startDownload() {
+        guard !isPlaceholderVideo else {
+            presentMessage("This item cannot be downloaded.")
+            return
+        }
+        showingDownloadPicker = true
+        isLoadingFormats = true
+        Task {
+            let formats = await downloadManager.fetchAvailableQualities(videoId: video.id)
+            availableFormats = formats
+            isLoadingFormats = false
+        }
+    }
+
+    private func addToWatchLater() async {
+        guard !isPlaceholderVideo else {
+            presentMessage("This item cannot be saved.")
+            return
+        }
+        guard authManager.isSignedIn else {
+            presentMessage("Sign in first to use Watch Later.")
+            return
+        }
+        guard let token = await authManager.getValidToken() else {
+            presentMessage("Could not get a valid token. Please sign in again.")
+            return
+        }
+
+        do {
+            if watchLaterDestination == "youtube" {
+                try await youtubeService.addVideoToWatchLater(videoId: video.id, accessToken: token)
+                presentMessage("Added to YouTube Watch Later.")
+            } else {
+                try await youtubeService.addVideoToGlassTubeWatchLater(videoId: video.id, accessToken: token)
+                presentMessage("Added to GlassTube Watch Later.")
+            }
+        } catch {
+            if youtubeService.isQuotaExceededError(error) {
+                presentMessage(youtubeService.quotaExceededMessage(for: "Watch Later"))
+            } else if youtubeService.isInsufficientScopeError(error) {
+                presentMessage(youtubeService.insufficientScopeMessage(for: "Watch Later saves"))
+            } else {
+                presentMessage("Could not add to Watch Later: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func presentMessage(_ message: String) {
+        actionMessage = message
+        showingActionAlert = true
     }
 }
 

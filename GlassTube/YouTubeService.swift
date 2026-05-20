@@ -1651,10 +1651,12 @@ class YouTubeService: ObservableObject {
 
         if let hlsURLString = streamingData["hlsManifestUrl"] as? String,
            let defaultHLSURL = URL(string: hlsURLString) {
-            let heights = availableHeights(
+            var heights = availableHeights(
                 combined: streamingData["formats"] as? [[String: Any]],
                 adaptive: streamingData["adaptiveFormats"] as? [[String: Any]]
             )
+            let m3u8Heights = await Self.fetchHLSVariantHeights(masterURL: defaultHLSURL)
+            if !m3u8Heights.isEmpty { heights = m3u8Heights }
             let options = hlsHeightOptions(availableHeights: heights, hlsURL: defaultHLSURL)
             return manifest(defaultURL: defaultHLSURL, options: options)
         }
@@ -1707,7 +1709,9 @@ class YouTubeService: ObservableObject {
         if let hlsManifestURLString = streamingData?.hlsManifestUrl,
            let hlsURL = URL(string: hlsManifestURLString) {
             let allFormats = (streamingData?.formats ?? []) + (streamingData?.adaptiveFormats ?? [])
-            let heights = availableHeights(formats: allFormats)
+            var heights = availableHeights(formats: allFormats)
+            let m3u8Heights = await Self.fetchHLSVariantHeights(masterURL: hlsURL)
+            if !m3u8Heights.isEmpty { heights = m3u8Heights }
             let options = hlsHeightOptions(availableHeights: heights, hlsURL: hlsURL)
             return manifest(defaultURL: hlsURL, options: options)
         }
@@ -1756,6 +1760,50 @@ class YouTubeService: ObservableObject {
     //    Each row has its own direct URL. Caps at 720p because combined
     //    formats only go up to 720p — AVPlayer can't demux single DASH
     //    adaptive URLs without external muxing.
+
+    /// Parse `#EXT-X-STREAM-INF ... RESOLUTION=WIDTHxHEIGHT` lines from an HLS
+    /// master manifest and return the unique heights.
+    ///
+    /// This is the authoritative source for what resolutions YouTube is
+    /// actually serving for a given video. The Innertube `formats` and
+    /// `adaptiveFormats` arrays are advisory — the iOS-client response in
+    /// particular frequently returns them empty or without `height` fields
+    /// even when the HLS manifest exposes 144p..4320p variants. Falling back
+    /// to manifest parsing keeps the quality picker honest regardless of
+    /// what's in the JSON.
+    private nonisolated static func fetchHLSVariantHeights(masterURL: URL) async -> Set<Int> {
+        var request = URLRequest(url: masterURL)
+        request.timeoutInterval = 8
+        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
+        request.setValue("https://www.youtube.com", forHTTPHeaderField: "Origin")
+        request.setValue("https://www.youtube.com/", forHTTPHeaderField: "Referer")
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse,
+                  (200...299).contains(http.statusCode),
+                  let text = String(data: data, encoding: .utf8) else {
+                return []
+            }
+
+            var heights = Set<Int>()
+            for rawLine in text.split(whereSeparator: { $0 == "\n" || $0 == "\r" }) {
+                let line = rawLine.trimmingCharacters(in: .whitespaces)
+                guard line.hasPrefix("#EXT-X-STREAM-INF") else { continue }
+                guard let resRange = line.range(of: "RESOLUTION=") else { continue }
+                let after = line[resRange.upperBound...]
+                // RESOLUTION attribute is unquoted: ends at the next comma or EOL.
+                let endIndex = after.firstIndex(where: { $0 == "," }) ?? after.endIndex
+                let resValue = after[after.startIndex..<endIndex]
+                let dims = resValue.split(separator: "x")
+                guard dims.count == 2, let h = Int(dims[1]), h > 0 else { continue }
+                heights.insert(h)
+            }
+            return heights
+        } catch {
+            return []
+        }
+    }
 
     private func hlsHeightOptions(availableHeights: Set<Int>, hlsURL: URL) -> [StreamQualityOption] {
         availableHeights
